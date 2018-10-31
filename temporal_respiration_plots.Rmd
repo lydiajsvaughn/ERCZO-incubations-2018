@@ -1,0 +1,240 @@
+---
+title: "Temporal respiration plots"
+author: "Lydia Vaughn"
+date: "26/10/2018"
+output: html_document
+---
+
+####1. Load packages
+```{r}
+library(tidyverse)
+```
+
+####2. Import and name all calculated respiration rate files 
+```{r}
+files <- list.files("data/calculated_respiration", full.names=TRUE) #list files in folder
+
+list2env(lapply(setNames(files, make.names(gsub("*.csv$", "", gsub("data.calculated_respiration.", "", x = files)))), read.csv), envir = .GlobalEnv) #convert list of files to separate, named data frames
+```
+
+####3. Add a date identifier column to each data frame and combine them into one long data frame
+```{r}
+respiration_rate_20180331$date <- as.POSIXct("2018-03-31")
+respiration_rate_20180605$date <- as.POSIXct("2018-06-05")
+respiration_rate_20180807$date <- as.POSIXct("2018-08-07")
+respiration_rate_20181002$date <- as.POSIXct("2018-10-02")
+
+long <- respiration_rate_20180331 %>% full_join(respiration_rate_20180605) %>% full_join(respiration_rate_20180807) %>% full_join(respiration_rate_20181002)
+```
+
+####4. For each depth increment and date, summarize the respiration rate (mean, sd, n, and se)
+```{r}
+increments <- long %>% group_by(date, increment) %>% summarize(mean.resp = mean(rate_mgC_d_g)) %>% full_join(long %>% group_by(date, increment) %>% summarize(sd.resp = sd(rate_mgC_d_g))) %>% full_join(long %>% group_by(date, increment) %>% summarize(n.resp = length(rate_mgC_d_g))) %>% mutate(se.resp = sd.resp / n.resp^0.5)
+```
+
+####5. For each soil layer, plot the summarized data as a bar graph
+```{r}
+plottheme <- theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) +
+  theme(axis.text = element_text(color="black", size=12)) +
+  theme(axis.title = element_text(color="black", size=14)) +
+  theme(legend.text = element_text(size=12)) +
+  theme(legend.title = element_text(size=14)) +
+  theme(plot.title = element_text(size = 14))
+
+organic <- ggplot(increments %>% filter(increment == "1"), aes(y = mean.resp * 1000, x = as.factor(date))) +
+  geom_bar(stat="identity", position=position_dodge(0.8), width=0.75) +
+  geom_hline(yintercept = 0, size = 0.25) +
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) +
+  xlab("Sample collection date") +
+  scale_x_discrete(breaks = c("2018-03-31", "2018-06-05", "2018-08-07", "2018-10-02"), labels = c("3/31", "6/5", "8/7", "10/2")) +
+  ggtitle("Organic soil") +
+  geom_errorbar(aes(ymin = mean.resp * 1000 - se.resp * 1000, ymax = mean.resp * 1000 + se.resp * 1000), position = position_dodge(0.8), width = 0.2, size = 0.4) 
+organic + plottheme
+
+shallow <- ggplot(increments %>% filter(increment == "2"), aes(y = mean.resp * 1000, x = as.factor(date))) +
+  geom_bar(stat="identity", position=position_dodge(0.8), width=0.75) +
+  geom_hline(yintercept = 0, size = 0.25) +
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) +
+  xlab("Sample collection date") +
+  scale_x_discrete(breaks = c("2018-03-31", "2018-06-05", "2018-08-07", "2018-10-02"), labels = c("3/31", "6/5", "8/7", "10/2")) +
+  ggtitle("Shallow mineral soil") +
+  geom_errorbar(aes(ymin = mean.resp * 1000 - se.resp * 1000, ymax = mean.resp * 1000 + se.resp * 1000), position = position_dodge(0.8), width = 0.2, size = 0.4) 
+shallow + plottheme
+
+deep <- ggplot(increments %>% filter(increment == "3"), aes(y = mean.resp * 1000, x = as.factor(date))) +
+  geom_bar(stat="identity", position=position_dodge(0.8), width=0.75) +
+  geom_hline(yintercept = 0, size = 0.25) +
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) +
+  xlab("Sample collection date") +
+  scale_x_discrete(breaks = c("2018-03-31", "2018-06-05", "2018-08-07", "2018-10-02"), labels = c("3/31", "6/5", "8/7", "10/2")) +
+  ggtitle("Deep mineral soil") +
+  geom_errorbar(aes(ymin = mean.resp * 1000 - se.resp * 1000, ymax = mean.resp * 1000 + se.resp * 1000), position = position_dodge(0.8), width = 0.2, size = 0.4) 
+deep + plottheme
+```
+
+####6. For each soil layer, plot mean respiration over time for each sample location
+```{r}
+plottheme2 <- theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) +
+  theme(axis.text = element_text(color="black", size=12)) +
+  theme(axis.title.y = element_text(color="black", size=14)) +
+  theme(axis.title.x = element_blank()) +
+  theme(legend.text = element_text(size=12)) +
+  theme(legend.title = element_text(size=14)) +
+  theme(plot.title = element_text(size = 14))
+
+
+organic.byplot <- ggplot(long %>% filter(increment == "1"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)), group = plot)) +
+  ggtitle("Organic soil") +
+  geom_point(color = "#5272A3", alpha = 0.7) +
+  geom_line(aes(group = plot), color = "#5272A3", alpha = 0.4) +
+  #scale_x_continuous(labels = xlabels, breaks = c(1, 2, 3), limits = c(1, 3)) +
+  scale_x_continuous(labels = c("3/31", "6/5", "8/7", "10/2"), breaks = c(1, 2, 3, 4), limits = c(1, 4))+
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(organic.byplot + plottheme2)
+
+shallow.byplot <- ggplot(long %>% filter(increment == "2"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)), group = plot)) +
+  ggtitle("Shallow mineral soil") +
+  geom_point(color = "#5272A3", alpha = 0.7) +
+  geom_line(aes(group = plot), color = "#5272A3", alpha = 0.4) +
+  #scale_x_continuous(labels = xlabels, breaks = c(1, 2, 3), limits = c(1, 3)) +
+  scale_x_continuous(labels = c("3/31", "6/5", "8/7", "10/2"), breaks = c(1, 2, 3, 4), limits = c(1, 4)) +
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(shallow.byplot + plottheme2)
+
+deep.byplot <- ggplot(long %>% filter(increment == "3"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)), group = plot)) +
+  ggtitle("Deep mineral soil") +
+  geom_point(color = "#5272A3", alpha = 0.7) +
+  geom_line(aes(group = plot), color = "#5272A3", alpha = 0.4) +
+  #scale_x_continuous(labels = xlabels, breaks = c(1, 2, 3), limits = c(1, 3)) +
+  scale_x_continuous(labels = c("3/31", "6/5", "8/7", "10/2"), breaks = c(1, 2, 3, 4), limits = c(1, 4)) +
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(deep.byplot + plottheme2)
+```
+
+####7. Remake the plots from the previous chunk, but without the 6/5 measurements, which I know were moisture-limited.  Instead of the previous formatting, label each line.
+```{r}
+organic.byplot.3 <- ggplot(long %>% filter(increment == "1" & date != "2018-06-05"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)))) +
+  ggtitle("Organic soil") +
+  geom_point(aes(color = plot)) +
+  geom_line(aes(color = plot), alpha = 0.4) +
+  scale_x_continuous(labels = c("3/31", "8/7", "10/2"), breaks = c(1, 2, 3), limits = c(1, 3))+
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(organic.byplot.3 + plottheme2)
+
+shallow.byplot.3 <- ggplot(long %>% filter(increment == "2" & date != "2018-06-05"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)))) +
+  ggtitle("Shallow mineral soil") +
+  geom_point(aes(color = plot)) +
+  geom_line(aes(color = plot), alpha = 0.4) +
+  scale_x_continuous(labels = c("3/31", "8/7", "10/2"), breaks = c(1, 2, 3), limits = c(1, 3))+
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(shallow.byplot.3 + plottheme2)
+
+deep.byplot.3 <- ggplot(long %>% filter(increment == "3" & date != "2018-06-05"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)))) +
+  ggtitle("Deep mineral soil") +
+  geom_point(aes(color = plot)) +
+  geom_line(aes(color = plot), alpha = 0.4) +
+  scale_x_continuous(labels = c("3/31", "8/7", "10/2"), breaks = c(1, 2, 3), limits = c(1, 3))+
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(deep.byplot.3 + plottheme2)
+```
+
+####8. Make the above plots but this time don't label each line.
+```{r}
+organic.byplot.2 <- ggplot(long %>% filter(increment == "1" & date != "2018-06-05"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)), group = plot)) +
+  ggtitle("Organic soil") +
+  geom_point(color = "#5272A3", alpha = 0.7) +
+  geom_line(aes(group = plot), color = "#5272A3", alpha = 0.4) +
+  #scale_x_continuous(labels = xlabels, breaks = c(1, 2, 3), limits = c(1, 3)) +
+  scale_x_continuous(labels = c("3/31", "8/7", "10/2"), breaks = c(1, 2, 3), limits = c(1, 3))+
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(organic.byplot.2 + plottheme2)
+
+shallow.byplot.2 <- ggplot(long %>% filter(increment == "2" & date != "2018-06-05"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)), group = plot)) +
+  ggtitle("Shallow mineral soil") +
+  geom_point(color = "#5272A3", alpha = 0.7) +
+  geom_line(aes(group = plot), color = "#5272A3", alpha = 0.4) +
+  scale_x_continuous(labels = c("3/31", "8/7", "10/2"), breaks = c(1, 2, 3), limits = c(1, 3))+
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(shallow.byplot.2 + plottheme2)
+
+deep.byplot.2 <- ggplot(long %>% filter(increment == "3" & date != "2018-06-05"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)), group = plot)) +
+  ggtitle("Deep mineral soil") +
+  geom_point(color = "#5272A3", alpha = 0.7) +
+  geom_line(aes(group = plot), color = "#5272A3", alpha = 0.4) +
+  scale_x_continuous(labels = c("3/31", "8/7", "10/2"), breaks = c(1, 2, 3), limits = c(1, 3))+
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(deep.byplot.2 + plottheme2)
+```
+
+####9. Remake the bar and line graphs, but separate data according to C/T
+```{r}
+long$CT <- sapply(strsplit(as.character(long$plot), ""), "[", 1)
+
+increments.CT <- long %>% group_by(date, increment, CT) %>% summarize(mean.resp = mean(rate_mgC_d_g)) %>% full_join(long %>% group_by(date, increment) %>% summarize(sd.resp = sd(rate_mgC_d_g))) %>% full_join(long %>% group_by(date, increment) %>% summarize(n.resp = length(rate_mgC_d_g))) %>% mutate(se.resp = sd.resp / n.resp^0.5)
+
+organic.CT <- ggplot(increments.CT %>% filter(increment == "1" & date != "2018-06-05"), aes(y = mean.resp * 1000, x = as.factor(date), fill = CT)) +
+  geom_bar(stat="identity", position=position_dodge(0.8), width=0.75) +
+  geom_hline(yintercept = 0, size = 0.25) +
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) +
+  xlab("Sample collection date") +
+  scale_x_discrete(breaks = c("2018-03-31", "2018-06-05", "2018-08-07", "2018-10-02"), labels = c("3/31", "6/5", "8/7", "10/2")) +
+  ggtitle("Organic soil") +
+  geom_errorbar(aes(ymin = mean.resp * 1000 - se.resp * 1000, ymax = mean.resp * 1000 + se.resp * 1000), position = position_dodge(0.8), width = 0.2, size = 0.4) 
+organic.CT + plottheme
+
+shallow.CT <- ggplot(increments.CT %>% filter(increment == "2" & date != "2018-06-05"), aes(y = mean.resp * 1000, x = as.factor(date), fill = CT)) +
+  geom_bar(stat="identity", position=position_dodge(0.8), width=0.75) +
+  geom_hline(yintercept = 0, size = 0.25) +
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) +
+  xlab("Sample collection date") +
+  scale_x_discrete(breaks = c("2018-03-31", "2018-06-05", "2018-08-07", "2018-10-02"), labels = c("3/31", "6/5", "8/7", "10/2")) +
+  ggtitle("Shallow mineral soil") +
+  geom_errorbar(aes(ymin = mean.resp * 1000 - se.resp * 1000, ymax = mean.resp * 1000 + se.resp * 1000), position = position_dodge(0.8), width = 0.2, size = 0.4) 
+shallow.CT + plottheme
+
+deep.CT <- ggplot(increments.CT %>% filter(increment == "3" & date != "2018-06-05"), aes(y = mean.resp * 1000, x = as.factor(date), fill = CT)) +
+  geom_bar(stat="identity", position=position_dodge(0.8), width=0.75) +
+  geom_hline(yintercept = 0, size = 0.25) +
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) +
+  xlab("Sample collection date") +
+  scale_x_discrete(breaks = c("2018-03-31", "2018-06-05", "2018-08-07", "2018-10-02"), labels = c("3/31", "6/5", "8/7", "10/2")) +
+  ggtitle("Deep mineral soil") +
+  geom_errorbar(aes(ymin = mean.resp * 1000 - se.resp * 1000, ymax = mean.resp * 1000 + se.resp * 1000), position = position_dodge(0.8), width = 0.2, size = 0.4) 
+deep.CT + plottheme
+
+organic.byCT.line <- ggplot(long %>% filter(increment == "1" & date != "2018-06-05"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)))) +
+  ggtitle("Organic soil") +
+  geom_point(aes(color = CT)) +
+  geom_line(aes(color = CT, group = plot), alpha = 0.4) +
+  scale_x_continuous(labels = c("3/31", "8/7", "10/2"), breaks = c(1, 2, 3), limits = c(1, 3))+
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(organic.byCT.line + plottheme2)
+
+shallow.byCT.line <- ggplot(long %>% filter(increment == "2" & date != "2018-06-05"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)))) +
+  ggtitle("Shallow mineral soil") +
+  geom_point(aes(color = CT)) +
+  geom_line(aes(color = CT, group = plot), alpha = 0.4) +
+  scale_x_continuous(labels = c("3/31", "8/7", "10/2"), breaks = c(1, 2, 3), limits = c(1, 3))+
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(shallow.byCT.line + plottheme2)
+
+deep.byCT.line <- ggplot(long %>% filter(increment == "3" & date != "2018-06-05"), aes(y = rate_mgC_d_g * 1000, x = as.numeric(as.factor(date)))) +
+  ggtitle("Deep mineral soil") +
+  geom_point(aes(color = CT)) +
+  geom_line(aes(color = CT, group = plot), alpha = 0.4) +
+  scale_x_continuous(labels = c("3/31", "8/7", "10/2"), breaks = c(1, 2, 3), limits = c(1, 3))+
+  ylab(expression(atop(CO[2]~production, (mu*g~C~~g~soil^-1~~d^-1)))) 
+
+print(deep.byCT.line + plottheme2)
+```
