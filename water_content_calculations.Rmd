@@ -1,0 +1,47 @@
+---
+title: "Water content"
+author: "Lydia Vaughn"
+date: "June 14, 2018"
+output: html_document
+---
+
+```{r}
+samples <- read.csv('data/sample_inventory.csv', header=T, sep=',', stringsAsFactors=F)
+water_content <- read.csv('data/water_content.csv', header=T, sep=',', stringsAsFactors=F)
+capacity <- read.csv('data/water_capacity_v2.csv', header=T, sep=',', stringsAsFactors=F)
+```
+
+```{r}
+library(tidyverse)
+```
+
+####Add a variable for core increment to both the water content and capacity data frames
+```{r}
+capacity <- capacity %>% left_join(samples %>% select(collection_date, plot, top_depth_cm, bottom_depth_cm, increment)) 
+
+water_content <- water_content %>% left_join(samples %>% select(collection_date, plot, top_depth_cm, bottom_depth_cm, increment)) 
+```
+
+####Make a dataframe that includes just sample info, gwc, and water-holding capacity
+####Use it to calculate the percentage of maximum water holding capacity and the water needed to reach 65% of water holding capacity (in mL of water per g of soil)
+```{r}
+combined <- capacity %>% select(plot, increment, water_holding_capacity_percent_dryweight) %>% full_join(water_content %>% select(collection_date, plot, top_depth_cm, bottom_depth_cm, increment, gwc_drysoil)) %>% mutate(percent_whc = gwc_drysoil / water_holding_capacity_percent_dryweight * 100, add_water_mL_g = (0.65 * water_holding_capacity_percent_dryweight - gwc_drysoil) / 100)
+```
+
+####Import dataframe of starting (field moisture) sample weights used in the incubation
+```{r}
+#change file and path as needed
+masses <- read.csv('data/collected_20180605/starting_weights_20180605.csv', header=T, sep=',', stringsAsFactors=F)
+```
+
+####Use GWC and additional water info to calculate sample-specific water additions
+```{r}
+water <- masses %>% left_join(combined %>% select(plot, top_depth_cm, bottom_depth_cm, collection_date, gwc_drysoil, percent_whc, add_water_mL_g)) %>% mutate(drysoil_g = wetsoil_g / (gwc_drysoil / 100 + 1), add_water_mL = add_water_mL_g * drysoil_g) %>% select(ID, drysoil_g, gwc_drysoil, percent_whc, add_water_mL)
+```
+
+####write dataframe
+```{r}
+write.csv(water, file = "data/collected_20180605/water_additions_20180605.csv") 
+
+```
+
