@@ -1,0 +1,150 @@
+---
+title: "Respiration_calcs"
+author: "Lydia Vaughn"
+date: "May 4, 2018"
+output: html_document
+---
+
+####1. Load packages
+```{r}
+library(tidyverse)
+```
+
+####2. Import all CO2 concentration files into a list of data frames
+```{r}
+path <- "data/collected_20181002" #change date as needed throughout code.  Also change the differently formatted date in chunk 7.
+
+files <- list.files(path, full.names=TRUE) #list files in folder
+
+#generate list of all CO2 concentration files
+concentrations <- lapply(setNames(grep("CO2_", ignore.case=F, value=T, x=files), make.names(gsub("*.csv$", "", gsub("data.collected_20181002.", "", grep("CO2_", ignore.case=F, value=T, x=files))))), read.csv) #change date as needed
+
+```
+
+####3. Import the volume, key, and weights data frames
+```{r}
+list2env(lapply(setNames(grep("CO2_", ignore.case=F, value=T, x=files, invert=T), make.names(gsub("*.csv$", "", gsub("data/collected_20181002/", "", grep("CO2_", ignore.case=F, value=T, x=files, invert=T))))), read.csv), envir = .GlobalEnv)
+```
+
+####4. Import the sample inventory data frame
+```{r}
+inventory <- read.csv('data/sample_inventory.csv', header=T, sep=',', stringsAsFactors=F)
+```
+
+####5. convert the vol data frame to long format and format dates
+```{r}
+longvol <- gather(headspace_vol, key="description", value="vol_mL", 5:length(names(headspace_vol)))
+longvol$date <- sapply(strsplit(as.character(longvol$description), "_"), "[", 2)
+longvol$description <- sapply(strsplit(as.character(longvol$description), "_"), "[", 1)
+```
+
+####6. format dates (all data frames)
+```{r}
+longvol$date <- as.Date(longvol$date, "%Y%m%d")
+inventory$date <- as.Date(as.character(inventory$collection_date), format = "%m/%d/%y")
+concentrations <- concentrations %>% lapply(. %>% mutate(date = as.Date(date, "%m/%d/%y")))
+```
+
+####7. and add a variable for increment number to the key data frame
+This isn't working well yet; it doesn't match the increments for the 20181002 data
+```{r}
+#key <- key %>% left_join(inventory %>% filter(date == "2018-03-31") %>% select("plot", "top_depth_cm", "bottom_depth_cm", "increment"))
+#key <- key %>% left_join(inventory %>% filter(date == "2018-06-05") %>% select("plot", "top_depth_cm", "bottom_depth_cm", "increment"))
+#key <- key %>% left_join(inventory %>% filter(date == "2018-08-07") %>% select("plot", "top_depth_cm", "bottom_depth_cm", "increment"))
+key <- key %>% left_join(inventory %>% filter(date == "2018-10-01" | date == "2018-10-02") %>% select("plot", "top_depth_cm", "bottom_depth_cm", "increment"))
+```
+
+####8. calculate mass of C in the headspace on each measurement date
+```{r}
+mgC <- longvol %>% filter(description == "headspace") %>% select("ID", "vol_mL", "date") %>% left_join(bind_rows(concentrations %>% lapply(. %>% select("ID", "postflush", "calibrated_ppm", "date")))) %>% mutate(headspace_mgC = 4.98169e-7 * calibrated_ppm * vol_mL) %>% rename(headspace_mL = vol_mL)
+```
+
+####9. calculate the mass of C removed from the jar (in the IRGA sample) on each measurement date
+```{r}
+longvol$postflush <- ifelse(longvol$description == "removedpostflush", "yes", "no")
+longvol$description <- ifelse(longvol$description == "removedpostflush", "removed", longvol$description)
+
+mgC <- mgC %>% full_join(longvol %>% filter(description == "removed") %>% select("ID", "postflush", "vol_mL", "date") %>% left_join(bind_rows(concentrations %>% lapply(. %>% select("ID", "postflush", "calibrated_ppm", "date")))) %>% mutate(removed_mgC = 4.98169e-7 * calibrated_ppm * vol_mL) %>% rename(removed_mL = vol_mL))
+```
+
+####10/2 only: fill in an approximate CO2 concentration for 10/22, based on a linear increase between 10/19 and 10/25.  
+Comment out this chunk for all sampling dates other than 10/2
+```{r}
+mgC <- longvol %>% filter(description == "headspace") %>% select("ID", "vol_mL", "date") %>% left_join(bind_rows(concentrations %>% lapply(. %>% select("ID", "postflush", "calibrated_ppm", "date")))) 
+
+d1 <- data.frame(concentrations[3]) %>% filter(CO2_20181019.ID == "29")
+d2 <- data.frame(concentrations[5]) %>% filter(CO2_20181025.ID == "29")
+
+mgC$calibrated_ppm <- ifelse(mgC$ID == "29" & mgC$date == "2018-10-22", (d1[,4] + d2[,4]) / 2, mgC$calibrated_ppm)
+
+mgC <- mgC %>% mutate(headspace_mgC = 4.98169e-7 * calibrated_ppm * vol_mL) %>% rename(headspace_mL = vol_mL)
+
+mgC <- mgC %>% full_join(longvol %>% filter(description == "removed") %>% select("ID", "postflush", "vol_mL", "date")) %>% mutate(removed_mgC = 4.98169e-7 * calibrated_ppm * vol_mL) %>% rename(removed_mL = vol_mL)
+```
+
+####10. for each sample, calculate the additional C respired (since the previous measurement) and the cumulate C respired
+```{r}
+for(j in 1:length(unique(mgC$ID))){
+  
+  sub <- mgC %>% filter(ID == unique(mgC$ID)[j]) %>% arrange(date, postflush) 
+
+  for(i in 1:length(sub$date)) {
+    sub$accum_mgC[i] = sub$headspace_mgC[i] - sub$headspace_mgC[i-1] + sub$removed_mgC[i-1]
+    }
+  sub$accum_mgC <- ifelse(sub$date == min(sub$date), "0", sub$accum_mgC)
+  if(j == "1") {accum <- sub}
+  if(j != "1") {accum <- accum %>% full_join(sub)}
+  }
+
+accum <- accum %>% filter(!is.na(accum_mgC)) %>% group_by(ID) %>% mutate(cum_mgC = cumsum(accum_mgC)) %>% full_join(key)
+```
+
+####11. create a variable for number of days since the start of the incubation
+```{r}
+min(accum$date)
+accum <- accum %>% group_by(ID) %>% mutate(days = date - min(date))
+accum$days <- as.numeric(accum$days)
+```
+
+####12. calculate the respiration rate per g soil C (average over the whole 2-week incubation)
+```{r}
+rate <- accum %>% full_join(key) %>% full_join(weights %>% select(plot, top_depth_cm, wetsoil_g, gwc_drysoil)) %>% filter(days == 14, !is.na(wetsoil_g)) %>% mutate(drysoil_g = wetsoil_g * 100 / (gwc_drysoil + 100), rate_mgC_d_g = cum_mgC / days / drysoil_g) 
+
+#range of CO2 production rate
+min(rate$rate_mgC_d_g)
+max(rate$rate_mgC_d_g)
+```
+
+####13. save the calculated respiration rates as a .csv file
+```{r}
+write.csv(rate %>% select("plot", "top_depth_cm", "bottom_depth_cm", "increment", "rate_mgC_d_g"), file = "data/calculated_respiration/respiration_rate_20181002.csv") 
+```
+
+####14. design plot theme
+```{r}
+plottheme <- theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank()) +
+  theme(axis.text = element_text(color="black", size=12)) +
+  theme(axis.title = element_text(size=14)) +
+  theme(legend.position = c(.9, .85)) +
+  theme(legend.title = element_text(size=14)) +
+  theme(legend.text = element_text(size=12)) 
+```
+
+####15. plot cumulative respiration in each plot
+```{r}
+for(i in 1:length(unique(accum$ID))){
+  sub <- accum %>% filter(ID == unique(accum$ID)[i])
+  chamber <- paste(sub$plot[1], sub$top_depth_cm[1]) 
+  chamber <- paste(chamber, sub$bottom_depth_cm[2], sep = "-") 
+  plot <- ggplot(sub, aes(y = cum_mgC, x = days)) +
+    geom_vline(xintercept = 14, lty = "dashed", color = "gray") +
+    geom_point() +
+    ylab("Cumulative respiration (mg C)") +
+    xlab("Days") +
+    ggtitle(chamber)
+    #ggtitle(paste("sample", unique(accum$ID)[i]))
+  print(plot + plottheme)
+}
+```
+
